@@ -2,7 +2,7 @@
 
 Browser-first **ESM** package: **sRGB ↔ OKLCH** conversion in WebAssembly, **image palette extraction**, and SVG **`d` paths** for **squircle / capsule** shapes. Also ships **C CLI tools** buildable on macOS (`extract-colors` reads images via ImageIO / CoreGraphics).
 
-**[简体中文](README.zh-CN.md)**
+**[简体中文](https://unpkg.com/@wenhaoqi/wasm_design_utils@latest/README.zh-CN.md)**
 
 ## Repository layout
 

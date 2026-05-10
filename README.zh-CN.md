@@ -2,7 +2,7 @@
 
 浏览器优先的 **ESM** 包：在 WebAssembly 中提供 **sRGB ↔ OKLCH** 转换、**图片主色/调色板提取**，以及 **squircle / capsule** 的 SVG `d` 路径。附带可在 macOS 上编译的 **C 命令行工具**（`extract-colors` 使用 ImageIO / CoreGraphics 读图）。
 
-**[English](README.md)**
+**[English](https://unpkg.com/@wenhaoqi/wasm_design_utils@latest/README.md)**
 
 ## 仓库布局
 
