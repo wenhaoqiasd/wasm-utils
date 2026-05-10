@@ -2,7 +2,8 @@
 /*
 Compare C capsule path against the original TS logic (ported to JS here)
 */
-const { spawnSync } = require('node:child_process');
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 function mr(i) {
   return Math.round(Number(i) * 1000) / 1000;
@@ -21,7 +22,8 @@ function getCapsulePath(width, height, radius) {
 }
 
 function runC(width, height, radius) {
-  const r = spawnSync('./squircle_svg', ['capsule', String(width), String(height), String(radius)], {
+  const bin = fileURLToPath(new URL("../bin/squircle_svg", import.meta.url));
+  const r = spawnSync(bin, ["capsule", String(width), String(height), String(radius)], {
     encoding: 'utf8'
   });
   if (r.error) throw r.error;

@@ -1,0 +1,63 @@
+{
+  "name": "@wenhaoqi/wasm_design_utils",
+  "version": "0.1.0",
+  "description": "OKLCH ↔ sRGB in WebAssembly, image palette extraction, and squircle/capsule SVG paths — browser ESM.",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "oklch",
+    "oklab",
+    "srgb",
+    "color",
+    "wasm",
+    "webassembly",
+    "extract-colors",
+    "palette",
+    "squircle",
+    "svg"
+  ],
+  "files": [
+    "src/**/*.js",
+    "src/**/*.d.ts",
+    "src/wasm/*.wasm",
+    "native/**/*.c",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./color": {
+      "types": "./src/color-convert.d.ts",
+      "import": "./src/color-convert.js"
+    },
+    "./extract-colors": {
+      "types": "./src/extract-colors.d.ts",
+      "import": "./src/extract-colors.js"
+    },
+    "./squircle": {
+      "types": "./src/squircle-svg.d.ts",
+      "import": "./src/squircle-svg.js"
+    }
+  },
+  "module": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "scripts": {
+    "build:native": "make native",
+    "build:wasm": "make wasm",
+    "build": "make all",
+    "test": "make test",
+    "prepublishOnly": "node scripts/ensure-wasm-built.js",
+    "setup:wasm": "bash scripts/setup-wasm-toolchain.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

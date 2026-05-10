@@ -1,1 +1,11 @@
 .DS_Store
+bin/
+
+# Local Emscripten SDK (build WASM only; not published)
+emsdk/
+
+# Stray native binaries sometimes produced at repo root (Makefile outputs to bin/)
+/oklch2rgb
+/rgb2oklch
+/extract-colors
+/squircle_svg

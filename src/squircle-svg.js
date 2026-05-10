@@ -1,8 +1,4 @@
-// squircle/capsule SVG path generator (browser ESM)
-// Exports:
-//   getPath(shape, width, height, radius) => Promise<string>
-//   getSquircle(width, height, radius) => Promise<string>
-//   getCapsule(width, height, radius) => Promise<string>
+// squircle / capsule SVG path（浏览器 ESM + squircle-svg.wasm）
 
 function createWasiStub(memory) {
   function ret0() { return 0; }
@@ -54,17 +50,25 @@ async function instantiateWasmWithFallback(url) {
   }
 }
 
-let _inst = null; let _mem = null; let _ready = false; let _initPromise = null;
+let _inst = null;
+let _mem = null;
+let _ready = false;
+let _initPromise = null;
+
+function resolveWasmUrl(options = {}) {
+  const wasmUrl = options.wasmUrl ?? "./wasm/squircle-svg.wasm";
+  if (typeof wasmUrl === "string" && wasmUrl.includes("://")) return wasmUrl;
+  return new URL(wasmUrl, import.meta.url).href;
+}
 
 async function ensureReady(options = {}) {
   if (_ready) return;
   if (_initPromise) return _initPromise;
-  const { wasmUrl = 'squircle-svg.wasm' } = options;
-  const url = new URL(wasmUrl, import.meta.url).href;
+  const url = resolveWasmUrl(options);
   _initPromise = (async () => {
     const inst = await instantiateWasmWithFallback(url);
     _inst = inst.exports;
-    _mem = _inst.memory; // emcc 默认导出 memory
+    _mem = _inst.memory;
     _ready = true;
   })();
   return _initPromise;
@@ -78,23 +82,27 @@ function readCString(ptr) {
   return new TextDecoder().decode(u8.subarray(ptr, end));
 }
 
+export async function initSquircleWasm(options) {
+  await ensureReady(options ?? {});
+}
+
 export async function getSquircle(width, height, radius, options) {
   await ensureReady(options);
   const p = _inst.squircle_path_js(+width, +height, +radius) >>> 0;
-  if (!p) throw new Error('squircle_path_js returned 0');
+  if (!p) throw new Error("squircle_path_js returned 0");
   return readCString(p);
 }
 
 export async function getCapsule(width, height, radius, options) {
   await ensureReady(options);
   const p = _inst.capsule_path_js(+width, +height, +radius) >>> 0;
-  if (!p) throw new Error('capsule_path_js returned 0');
+  if (!p) throw new Error("capsule_path_js returned 0");
   return readCString(p);
 }
 
 export async function getPath(shape, width, height, radius, options) {
   const s = String(shape).toLowerCase();
-  if (s === 'squircle') return getSquircle(width, height, radius, options);
-  if (s === 'capsule') return getCapsule(width, height, radius, options);
-  throw new Error('Unknown shape: ' + shape);
+  if (s === "squircle") return getSquircle(width, height, radius, options);
+  if (s === "capsule") return getCapsule(width, height, radius, options);
+  throw new Error("Unknown shape: " + shape);
 }

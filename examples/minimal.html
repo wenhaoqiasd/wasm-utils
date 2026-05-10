@@ -2,7 +2,7 @@
 <html lang="zh-cn">
   <head>
     <meta charset="utf-8" />
-    <title>颜色转换与图片取色</title>
+    <title>@wenhaoqi/wasm_design_utils 演示：OKLCH / 取色 / squircle</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       body {
@@ -43,7 +43,6 @@
         vertical-align: middle;
         margin-right: 8px;
       }
-      /* 入参变化高亮 */
       .animating {
         outline: 2px solid #f90;
         outline-offset: 2px;
@@ -53,6 +52,11 @@
   </head>
 
   <body>
+    <p style="color:#666;font-size:14px">
+      本地预览：<code>python3 -m http.server 8000</code>，打开
+      <code>http://localhost:8000/examples/minimal.html</code>（需先 <code>make wasm</code> 生成 <code>src/wasm/*.wasm</code>）。
+    </p>
+
     <h2>rgb2oklch</h2>
     <div class="row">
       <label for="r">R</label>
@@ -119,10 +123,8 @@
         rgb2oklch as roFn,
         oklch2rgb_abs,
         oklch2rgb_rel,
-      } from "./color-convert.js";
+      } from "../src/color-convert.js";
 
-      // color-convert.js 内部会自动初始化，无需在此显式调用。
-      // 初始提示文案：
       document.getElementById("out").textContent = "计算中...";
       document.getElementById("out2").textContent = "计算中...";
 
@@ -157,7 +159,6 @@
           document.getElementById("out").textContent = `L ${fmtNum(
             L
           )}  C ${fmtNum(_C)}  h ${fmtNum(_h)}`;
-          // Show OKLCH via CSS color function
           const chip = document.getElementById("chip-oklch");
           const cssColor = `oklch(${fmtPct01(L)} ${fmtNum(_C)} ${fmtNum(
             _h
@@ -169,7 +170,6 @@
           console.error(e);
         }
       }
-      // 输入框 onchange 触发更新
       ["r", "g", "b"].forEach((id) =>
         document.getElementById(id).addEventListener("change", updateRgb2Oklch)
       );
@@ -187,7 +187,6 @@
           document.getElementById(
             "out2"
           ).textContent = `R ${rgb.R}  G ${rgb.G}  B ${rgb.B}`;
-          // Show RGB via CSS color function
           const chip = document.getElementById("chip-rgb");
           const cssColor = `rgb(${rgb.R}, ${rgb.G}, ${rgb.B})`;
           chip.style.background = cssColor;
@@ -197,12 +196,10 @@
           console.error(e);
         }
       }
-      // 输入框 onchange 触发更新
       ["l", "c", "h", "rel"].forEach((id) =>
         document.getElementById(id).addEventListener("change", updateOklch2Rgb)
       );
 
-      // 初次自动计算一次
       (async () => {
         await Promise.all([updateRgb2Oklch(), updateOklch2Rgb()]);
       })();
@@ -236,9 +233,8 @@
     </div>
 
     <script type="module">
-      import extractColors from "./extract-colors.js";
+      import extractColors from "../src/extract-colors.js";
 
-      // 初始提示
       document.getElementById("extract-out").textContent = "请选择图片";
 
       function renderSwatches(colors, elapsedMs) {
@@ -258,7 +254,6 @@
           if (ms >= 1000) return (ms / 1000).toFixed(2) + " s";
           return Math.round(ms) + " ms";
         };
-        // 按占比从高到低排序
         const sorted = [...colors].sort((a, b) => {
           const aa = Number.isFinite(a?.area) ? a.area : 0;
           const bb = Number.isFinite(b?.area) ? b.area : 0;
@@ -279,7 +274,6 @@
         out.textContent = timing + JSON.stringify(sorted, null, 2);
       }
 
-      // 交互：文件选择 -> 直接走模块内置的共享 Canvas 流程
       let _lastImage = null;
       function readFileAsDataURL(file) {
         return new Promise((resolve, reject) => {
@@ -326,107 +320,104 @@
           });
       });
     </script>
+
+    <hr />
+    <h2 style="margin-top: 24px">squircle-svg (WASM)</h2>
+    <div class="row" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <label for="shape">形状</label>
+      <select id="shape">
+        <option value="squircle" selected>squircle</option>
+        <option value="capsule">capsule</option>
+      </select>
+      <label for="w2">W</label>
+      <input id="w2" type="number" min="1" value="200" />
+      <label for="h2">H</label>
+      <input id="h2" type="number" min="1" value="120" />
+      <label for="r2">R</label>
+      <input id="r2" type="number" min="0" value="16" />
+      <button id="gen-shape">生成</button>
+      <button id="toggle-anim" title="宽度动画">宽度动画</button>
+    </div>
+    <div class="row" style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap">
+      <svg id="svg-demo" width="300" height="220" viewBox="0 0 200 120">
+        <path id="svg-path" d="" fill="#09f"></path>
+      </svg>
+      <pre id="svg-path-text" style="min-width:320px; flex:1; overflow:auto">加载中...</pre>
+    </div>
+
+    <script type="module">
+      import { getPath } from "../src/squircle-svg.js";
+
+      const $ = (id) => document.getElementById(id);
+      const elShape = $("shape");
+      const elW = $("w2");
+      const elH = $("h2");
+      const elR = $("r2");
+      const btn = $("gen-shape");
+      const svg = $("svg-demo");
+      const pathEl = $("svg-path");
+      const textEl = $("svg-path-text");
+
+      let isRendering = false;
+      async function renderShape(silent = false) {
+        try {
+          if (!silent) textEl.textContent = "生成中...";
+          if (isRendering) return;
+          isRendering = true;
+          const shape = elShape.value;
+          const w = Math.max(1, +elW.value);
+          const h = Math.max(1, +elH.value);
+          const r = Math.max(0, +elR.value);
+          const d = await getPath(shape, w, h, r);
+          svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+          svg.setAttribute("width", String(w));
+          svg.setAttribute("height", String(h));
+          pathEl.setAttribute("d", d);
+          if (!silent) textEl.textContent = d;
+        } catch (e) {
+          if (!silent) textEl.textContent = "运行失败：" + e;
+          console.error(e);
+        } finally {
+          isRendering = false;
+        }
+      }
+      btn.addEventListener("click", () => renderShape());
+      [elShape, elW, elH, elR].forEach((el) =>
+        el.addEventListener("change", () => renderShape())
+      );
+      renderShape();
+
+      const animBtn = $("toggle-anim");
+      const W_MIN = 300;
+      const W_MAX = 800;
+      const DURATION = 150;
+      let animRunning = false;
+      let rafId = 0;
+      let t0 = 0;
+
+      function loop() {
+        if (!animRunning) return;
+        const now = performance.now();
+        const cycle = ((now - t0) % (DURATION * 2)) / DURATION;
+        const t = cycle < 1 ? cycle : 2 - cycle;
+        const w = W_MIN + (W_MAX - W_MIN) * t;
+        elW.value = Math.max(1, Math.round(w));
+        if (!isRendering) renderShape(true);
+        rafId = requestAnimationFrame(loop);
+      }
+
+      animBtn.addEventListener("click", () => {
+        animRunning = !animRunning;
+        animBtn.textContent = animRunning ? "停止动画" : "宽度动画";
+        if (animRunning) {
+          t0 = performance.now();
+          elW.classList.add("animating");
+          loop();
+        } else if (rafId) {
+          cancelAnimationFrame(rafId);
+          elW.classList.remove("animating");
+        }
+      });
+    </script>
   </body>
-  
-  <hr />
-  <h2 style="margin-top: 24px">squircle-svg (WASM)</h2>
-  <div class="row" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
-    <label for="shape">形状</label>
-    <select id="shape">
-      <option value="squircle" selected>squircle</option>
-      <option value="capsule">capsule</option>
-    </select>
-    <label for="w2">W</label>
-    <input id="w2" type="number" min="1" value="200" />
-    <label for="h2">H</label>
-    <input id="h2" type="number" min="1" value="120" />
-    <label for="r2">R</label>
-    <input id="r2" type="number" min="0" value="16" />
-    <button id="gen-shape">生成</button>
-  <button id="toggle-anim" title="在 200↔400 之间以 300ms 每段往返动画">宽度动画</button>
-  </div>
-  <div class="row" style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap">
-    <svg id="svg-demo" width="300" height="220" viewBox="0 0 200 120">
-      <path id="svg-path" d="" fill="#09f"></path>
-    </svg>
-    <pre id="svg-path-text" style="min-width:320px; flex:1; overflow:auto">加载中...</pre>
-  </div>
-
-  <script type="module">
-    import { getPath } from './squircle-svg.js';
-
-    const $ = (id) => document.getElementById(id);
-    const elShape = $('shape');
-    const elW = $('w2');
-    const elH = $('h2');
-    const elR = $('r2');
-    const btn = $('gen-shape');
-    const svg = $('svg-demo');
-    const pathEl = $('svg-path');
-    const textEl = $('svg-path-text');
-
-    let isRendering = false;
-    async function renderShape(silent = false) {
-      try {
-        if (!silent) textEl.textContent = '生成中...';
-        if (isRendering) return; // 防止并发渲染
-        isRendering = true;
-        const shape = elShape.value;
-        const w = Math.max(1, +elW.value);
-        const h = Math.max(1, +elH.value);
-        const r = Math.max(0, +elR.value);
-        const d = await getPath(shape, w, h, r);
-  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-  // 同步显示尺寸，便于直观看到宽/高变化
-  svg.setAttribute('width', String(w));
-  svg.setAttribute('height', String(h));
-        pathEl.setAttribute('d', d);
-        if (!silent) textEl.textContent = d;
-      } catch (e) {
-        if (!silent) textEl.textContent = '运行失败：' + e;
-        console.error(e);
-      } finally {
-        isRendering = false;
-      }
-    }
-    btn.addEventListener('click', () => renderShape());
-    [elShape, elW, elH, elR].forEach((el) => el.addEventListener('change', () => renderShape()));
-    // 初次渲染
-    renderShape();
-
-    // 宽度差值动画：在 200 ↔ 400 间往返，单段 300ms（线性）。
-    const animBtn = $('toggle-anim');
-    const W_MIN = 300;
-    const W_MAX = 800;
-    const DURATION = 150; // ms per segment
-    let animRunning = false;
-    let rafId = 0;
-    let t0 = 0;
-
-    function loop() {
-      if (!animRunning) return;
-      const now = performance.now();
-      const cycle = ((now - t0) % (DURATION * 2)) / DURATION; // 0..2
-      const t = cycle < 1 ? cycle : 2 - cycle; // 往返 0..1..0
-      const w = W_MIN + (W_MAX - W_MIN) * t; // 线性插值
-      elW.value = Math.max(1, Math.round(w));
-      // 静默渲染，避免每帧重写文本
-      if (!isRendering) renderShape(true);
-      rafId = requestAnimationFrame(loop);
-    }
-
-  animBtn.addEventListener('click', () => {
-      animRunning = !animRunning;
-      animBtn.textContent = animRunning ? '停止动画' : '宽度动画';
-      if (animRunning) {
-        t0 = performance.now();
-    elW.classList.add('animating');
-        loop();
-      } else if (rafId) {
-        cancelAnimationFrame(rafId);
-    elW.classList.remove('animating');
-      }
-    });
-  </script>
-</html>
 </html>

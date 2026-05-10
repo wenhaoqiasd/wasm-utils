@@ -1,11 +1,7 @@
-// 颜色转换合并模块（浏览器端 ESM）
-// - 统一初始化：一次并行加载 oklch2rgb.wasm 与 rgb2oklch.wasm
-// - 导出 API：
-//   oklch2rgb_abs(L, C, h)                 —— 绝对色度：OKLCH -> sRGB(0..255)（异步）
-//   oklch2rgb_rel(L, h, rel)               —— 相对色度：OKLCH(L,h,相对色度0..1) -> sRGB(0..255)（异步）
-//   rgb2oklch(r, g, b)                     —— sRGB(0..255) -> OKLCH（异步）
+// OKLCH ↔ sRGB（浏览器 ESM，独立 WASM）
+// - init：并行加载 oklch2rgb.wasm 与 rgb2oklch.wasm（幂等）
+// - rgb2oklch / oklch2rgb_abs / oklch2rgb_rel：高层 API
 
-// ---- 最小化 WASM 实例化辅助（内联自 wasm-util，按需精简） ----
 function createWasiStub(memory) {
   function ret0() { return 0; }
   function fd_write(_fd, _iov, _iovcnt, pOut) {
@@ -45,14 +41,7 @@ function createWasiStub(memory) {
   };
 }
 
-/**
- * 尝试以最优方式实例化 WASM：
- * 1) 优先使用 instantiateStreaming（服务器返回 application/wasm）
- * 2) 回退为 ArrayBuffer 实例化
- * 3) 如果缺少导入（wasi/env），再使用最小化的导入桩并提供独立内存
- */
 async function instantiateWasmWithFallback(url) {
-  // 首选路径：单次请求，能流式就流式，否则走 arrayBuffer
   try {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
@@ -65,7 +54,6 @@ async function instantiateWasmWithFallback(url) {
     const { instance } = await WebAssembly.instantiate(await resp.arrayBuffer(), {});
     return instance;
   } catch {
-    // 回退路径：提供最小 WASI/env 导入和独立内存（避免导入缺失带来的实例化失败）
     const resp2 = await fetch(url);
     if (!resp2.ok) throw new Error(`Failed to fetch ${url}: ${resp2.status}`);
     const buf = await resp2.arrayBuffer();
@@ -80,25 +68,29 @@ async function instantiateWasmWithFallback(url) {
   }
 }
 
-// ---- 两个 WASM 模块的共享状态 ----
-let okExports = null; // oklch2rgb wasm exports
-let okMem = null;     // oklch2rgb wasm memory
-let rgbExports = null;// rgb2oklch wasm exports
-let rgbMem = null;    // rgb2oklch wasm memory
-let _ready = false;       // 初始化是否完成
-let _initPromise = null;  // 初始化中的 Promise，避免重复开销
+let okExports = null;
+let okMem = null;
+let rgbExports = null;
+let rgbMem = null;
+let _ready = false;
+let _initPromise = null;
 
-// 内部懒加载：并行加载两个 WASM，一次就绪，重复调用复用同一 Promise
 async function ensureReady(options = {}) {
   if (_ready) return;
   if (_initPromise) return _initPromise;
   const {
-    oklch2rgbUrl = 'oklch2rgb.wasm',
-    rgb2oklchUrl = 'rgb2oklch.wasm',
+    oklch2rgbUrl = new URL("./wasm/oklch2rgb.wasm", import.meta.url).href,
+    rgb2oklchUrl = new URL("./wasm/rgb2oklch.wasm", import.meta.url).href,
   } = options;
 
-  const okUrl = new URL(oklch2rgbUrl, import.meta.url).href;
-  const rgbUrl = new URL(rgb2oklchUrl, import.meta.url).href;
+  const okUrl =
+    typeof oklch2rgbUrl === "string" && oklch2rgbUrl.includes("://")
+      ? oklch2rgbUrl
+      : new URL(oklch2rgbUrl, import.meta.url).href;
+  const rgbUrl =
+    typeof rgb2oklchUrl === "string" && rgb2oklchUrl.includes("://")
+      ? rgb2oklchUrl
+      : new URL(rgb2oklchUrl, import.meta.url).href;
 
   _initPromise = (async () => {
     const [okInst, rgbInst] = await Promise.all([
@@ -114,12 +106,11 @@ async function ensureReady(options = {}) {
   return _initPromise;
 }
 
-// ---- 转换函数 ----
-/**
- * OKLCH 绝对色度 -> sRGB 整数分量
- * 入参：L, C, h
- * 返回：{ R, G, B }，范围 0..255
- */
+/** 预加载两块颜色转换 WASM；与首次调用转换函数效果相同，可提前并行初始化。 */
+export async function init(options) {
+  await ensureReady(options ?? {});
+}
+
 export async function oklch2rgb_abs(L, C, h) {
   await ensureReady();
   const ptr = okExports.oklch2rgb_calc_js(+L, +C, +h) >>> 0;
@@ -127,11 +118,6 @@ export async function oklch2rgb_abs(L, C, h) {
   return { R: i32[0] | 0, G: i32[1] | 0, B: i32[2] | 0 };
 }
 
-/**
- * OKLCH 相对色度 -> sRGB 整数分量
- * 入参：L, h, rel（相对色度 0..1）
- * 返回：{ R, G, B }，范围 0..255
- */
 export async function oklch2rgb_rel(L, h, rel) {
   await ensureReady();
   const r = Math.max(0, Math.min(1, Number(rel)));
@@ -140,15 +126,9 @@ export async function oklch2rgb_rel(L, h, rel) {
   return { R: i32[0] | 0, G: i32[1] | 0, B: i32[2] | 0 };
 }
 
-/**
- * sRGB 整数分量 -> OKLCH 浮点分量
- * 入参：r, g, b（0..255）
- * 返回：{ L, C, h }
- */
 export async function rgb2oklch(r, g, b) {
   await ensureReady();
   const ptr = rgbExports.rgb2oklch_calc_js(r | 0, g | 0, b | 0) >>> 0;
   const f64 = new Float64Array(rgbMem.buffer, ptr, 3);
   return { L: f64[0], C: f64[1], h: f64[2] };
 }
-

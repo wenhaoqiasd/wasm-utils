@@ -1,202 +1,349 @@
-# RGB ↔ OKLCH 数字转换器
+# @wenhaoqi/wasm_design_utils
 
-两个用 C 实现的命令行小工具，在 sRGB 与 OKLCH 之间互转，均采用“数字入/数字出”的简单接口。
+Browser-first **ESM** package: **sRGB ↔ OKLCH** conversion in WebAssembly, **image palette extraction**, and SVG **`d` paths** for **squircle / capsule** shapes. Also ships **C CLI tools** buildable on macOS (`extract-colors` reads images via ImageIO / CoreGraphics).
 
-## 编译
+**[简体中文](README.zh-CN.md)**
 
-```zsh
-gcc -O2 rgb2oklch.c -o rgb2oklch
-gcc -O2 oklch2rgb.c -o oklch2rgb
+## Repository layout
+
+| Path | Purpose |
+|------|---------|
+| `native/*.c` | Algorithms and CLI sources |
+| `src/*.js` | Browser loaders/wrappers (`import.meta.url` resolves WASM next to each module under `src/wasm/`) |
+| `src/wasm/*.wasm` | Emscripten outputs (run `make wasm`; generate from source if not checked in) |
+| `bin/*` | Native binaries from `make native` (ignored by git by default) |
+| `examples/minimal.html` | Static demo (serve over HTTP; build WASM first) |
+
+## Install
+
+```bash
+npm install @wenhaoqi/wasm_design_utils
 ```
 
-## 工具 1：rgb2oklch
+The package is **ESM-only** (`"type": "module"`). TypeScript definitions ship as `.d.ts`.
 
-- 输入：三参数 R G B（0–255 数字，按 sRGB 8 位通道解释）
-- 输出：三数字 `L C h`
-  - L ∈ [0,1]
-  - C ≥ 0
-  - h 为角度数值（度）；当 C≈0 时强制 h=0
+### Subpath exports
 
-示例：
+| Entry | Scope |
+|-------|--------|
+| `@wenhaoqi/wasm_design_utils` | Barrel export (API below) |
+| `@wenhaoqi/wasm_design_utils/color` | OKLCH ↔ sRGB only |
+| `@wenhaoqi/wasm_design_utils/extract-colors` | Palette extraction only |
+| `@wenhaoqi/wasm_design_utils/squircle` | Squircle / capsule paths only |
 
-```zsh
-./rgb2oklch 255 255 255
-# 1 0 0
+Bundlers (Vite, Webpack 5+, etc.) treat `src/wasm/*.wasm` as assets. If WASM files are missing, run `make wasm` in this repo or place the four `.wasm` files under `src/wasm/` in the published package.
 
-./rgb2oklch 128 100 231
-# 0.597263 0.190026 289.184618
+---
+
+## Browser API overview
+
+### Color: `init`, `rgb2oklch`, `oklch2rgb_abs`, `oklch2rgb_rel`
+
+| Function | Description |
+|----------|-------------|
+| `init(options?)` | Preloads `oklch2rgb.wasm` and `rgb2oklch.wasm` in parallel (idempotent). Optional `oklch2rgbUrl`, `rgb2oklchUrl` (relative to this module or absolute URL). |
+| `rgb2oklch(r, g, b)` | sRGB 8-bit channels 0–255 → `{ L, C, h }` (L ∈ [0, 1], `h` in degrees). |
+| `oklch2rgb_abs(L, C, h)` | Absolute chroma OKLCH → `{ R, G, B }`. |
+| `oklch2rgb_rel(L, h, rel)` | **Relative chroma** `rel` ∈ [0, 1]: uses that fraction of the maximum in-gamut chroma at the given L and h (ignores a separate C input) → `{ R, G, B }`. |
+
+Default WASM URLs resolve from each module to `./wasm/oklch2rgb.wasm` and `./wasm/rgb2oklch.wasm`.
+
+### Palette: `extractColors`, `initExtractColorsWasm`
+
+| Function | Description |
+|----------|-------------|
+| `initExtractColorsWasm(options?)` | Preloads `extract-colors.wasm`; optional `wasmUrl`. |
+| `extractColors(input, opts?)` | Extracts a palette from a **URL string**, **HTMLImageElement**, **ImageData**, or `{ data, width, height }`. Returns objects such as `{ hex, red, green, blue, hue, intensity, lightness, saturation, area, … }` with the same ordering rules as the implementation. |
+
+Common options: `pixels`, `distance`, `saturationDistance`, `lightnessDistance`, `hueDistance`, `crossOrigin`, `colorValidator(r,g,b,a)`.
+
+### Smooth corners (SVG paths): `initSquircleWasm`, `getSquircle`, `getCapsule`, `getPath`
+
+| Function | Description |
+|----------|-------------|
+| `initSquircleWasm(options?)` | Preloads `squircle-svg.wasm`; optional `wasmUrl`. |
+| `getSquircle(w, h, r)` | SVG path **`d`** string for a squircle. |
+| `getCapsule(w, h, r)` | SVG path **`d`** string for a capsule. |
+| `getPath(shape, w, h, r)` | Dispatches when `shape` is `'squircle'` or `'capsule'`. |
+
+---
+
+## JavaScript usage (per API)
+
+Imports use the package root or subpaths, for example `"@wenhaoqi/wasm_design_utils"` and `"@wenhaoqi/wasm_design_utils/color"`.
+
+### Color
+
+#### `init(options?)`
+
+Warms up both color WASM modules. Optional: conversion functions call this implicitly on first use.
+
+```js
+import { init } from "@wenhaoqi/wasm_design_utils";
+
+await init();
 ```
 
-## 工具 2：oklch2rgb
+Custom WASM locations (absolute URL or path resolved by your bundler):
 
-- 输入：三参数 L C h（L∈[0,1]、C≥0、h 为度数 0–360）
-- 输出：三数字 `R G B`（0–255 的整数，sRGB 编码并夹紧）
-
-示例：
-
-```zsh
-./oklch2rgb 0.5964 0.1899 289.06
-# 128 100 231
+```js
+await init({
+  oklch2rgbUrl: new URL("./assets/oklch2rgb.wasm", import.meta.url).href,
+  rgb2oklchUrl: "https://cdn.example.com/rgb2oklch.wasm",
+});
 ```
 
-相对色度（Relative chroma，可选第四参 `rel`，范围 [0,1]）：
+#### `rgb2oklch(r, g, b)`
 
-- 当提供 `rel` 时，会忽略输入的 `C`，转而计算 `C = rel * Cmax(L, h)`，其中 `Cmax(L,h)` 为在 sRGB 色域内可达的最大色度；随后仍会进行一次色域安全收敛以保证线性 sRGB ∈ [0,1]。
-- 行为检查示例：
+```js
+import { rgb2oklch } from "@wenhaoqi/wasm_design_utils";
 
-```zsh
-# rel=0 得到同亮度的灰色
-./oklch2rgb 0.7 0.2 40 0   # -> 158 158 158（示例数值）
-
-# rel=1 得到该 L/h 下的最大可显示色度
-./oklch2rgb 0.7 0.2 40 1   # -> 255 104 44（示例数值）
-
-# rel 介于 0 和 1 之间得到渐进的去饱和
-./oklch2rgb 0.7 999 40 0.5 # -> 211 137 111（示例数值）
+const { L, C, h } = await rgb2oklch(255, 128, 64);
+// L ∈ [0, 1], C ≥ 0, h in degrees (0 when C ≈ 0)
 ```
 
-## 往返验证（可选）
+#### `oklch2rgb_abs(L, C, h)`
 
-```zsh
-./rgb2oklch 128 100 231 | awk '{print $1, $2, $3}' | xargs ./oklch2rgb
-# 128 100 231
+```js
+import { oklch2rgb_abs } from "@wenhaoqi/wasm_design_utils";
+
+const { R, G, B } = await oklch2rgb_abs(0.63, 0.25, 29.2);
 ```
 
-## 工具 3：extract-colors（图片主色/调色板提取）
+#### `oklch2rgb_rel(L, h, rel)`
 
-- 输入：图片路径（CLI），或在浏览器端传入 URL/HTMLImageElement/ImageData。
-- 输出：JSON 数组，每个条目包含：
-  - `hex`, `red`, `green`, `blue`, `hue`, `intensity`, `lightness`, `saturation`, `area`
+```js
+import { oklch2rgb_rel } from "@wenhaoqi/wasm_design_utils";
 
-macOS 下编译 CLI（使用 CoreGraphics/ImageIO 读取图片）：
-
-```zsh
-clang -O2 extract-colors.c -o extract-colors \
-  -framework ImageIO -framework CoreGraphics -framework CoreFoundation
+// rel ∈ [0, 1]: fraction of max in-gamut chroma at this L and hue
+const { R, G, B } = await oklch2rgb_rel(0.7, 40, 0.5);
 ```
 
-命令行用法（默认与 Namide/extract-colors 接近）：
+### Palette
 
-```zsh
-./extract-colors <image_path> \
-  [--pixels N] [--distance D] \
-  [--saturationDistance S] [--lightnessDistance L] [--hueDistance H] \
-  [--alphaThreshold A] [--maxColors K]
+#### `initExtractColorsWasm(options?)`
 
-# 默认：pixels=64000, distance=0.22, saturationDistance=0.2,
-#       lightnessDistance=0.2, hueDistance≈1/12(30°), alphaThreshold=250, maxColors=16
+```js
+import { initExtractColorsWasm } from "@wenhaoqi/wasm_design_utils";
+
+await initExtractColorsWasm();
+
+await initExtractColorsWasm({
+  wasmUrl: new URL("./wasm/extract-colors.wasm", import.meta.url).href,
+});
 ```
 
-示例（输出为 JSON 数组）：
+#### `extractColors(input, opts?)`
 
-```zsh
-./extract-colors m.png | jq .[0]
+```js
+import extractColors from "@wenhaoqi/wasm_design_utils/extract-colors";
+
+// Loaded <img> / Image / canvas-backed bitmap
+const swatches = await extractColors(document.querySelector("#photo"));
 ```
 
-## 说明
-
-- 转换基于 OKLab/OKLCH 参考实现（Björn Ottosson）。
-- 仅使用 sRGB 色彩空间与标准传输函数。
-- 输出为纯数字便于脚本处理；若需固定小数位或 JSON 格式，可在源码中调整打印逻辑。
-
-以上三个工具均先用 C 实现核心算法，再编译为 WebAssembly 用于网页端最小实践（纯原生 JS 加载，无 Emscripten 胶水脚本）。
-
-## 使用 Makefile 一键构建与测试
-
-本仓库已提供顶层 `Makefile`，常用命令：
-
-```zsh
-# 构建本地可执行文件 + 构建三份 WASM + 运行最小烟测
-make all
-
-# 仅构建本地可执行文件（macOS）
-make native
-
-# 仅构建 WASM（需要 emcc 在 PATH 中）
-make wasm
-
-# 运行最小烟测（依赖已构建好的本地可执行文件）
-make test
-
-# 清理产物（本地二进制与 wasm 文件）
-make clean
+```js
+// Image URL (use crossOrigin when the image is cross-origin)
+const fromHttp = await extractColors("https://example.com/photo.jpg", {
+  crossOrigin: "anonymous",
+});
 ```
 
-说明：
+```js
+// Clustering / sampling controls (defaults match the implementation)
+const tuned = await extractColors(img, {
+  pixels: 64000,
+  distance: 0.22,
+  saturationDistance: 0.2,
+  lightnessDistance: 0.2,
+  hueDistance: 1 / 12,
+});
+```
 
-- 本地构建使用 `clang -O3 -ffast-math -std=c11`（`oklch2rgb/rgb2oklch` 还带 `-march=native`）。
-- `extract-colors` 本地构建依赖 macOS Frameworks：ImageIO、CoreGraphics、CoreFoundation。
-- WASM 构建采用独立 `.wasm`（`-s STANDALONE_WASM=1 --no-entry`），导出：
-  - `oklch2rgb.wasm`: `oklch2rgb_calc_js`, `oklch2rgb_calc_rel_js`
-  - `rgb2oklch.wasm`: `rgb2oklch_calc_js`
-  - `extract-colors.wasm`: `get_pixels_buffer`, `extract_colors_from_rgba_js`
+```js
+// Drop-in pixel filter before clustering
+const maskBg = await extractColors(img, {
+  colorValidator: (r, g, b, a) => a > 128,
+});
+```
 
-若尚未安装 Emscripten，请先安装并配置 emcc 到 PATH。
+Each swatch includes fields such as `hex`, `red`, `green`, `blue`, `hue`, `intensity`, `lightness`, `saturation`, `area`.
 
-## WebAssembly 构建与最小示例
+### Squircle / capsule
 
-- 目录 `wasm/` 下包含可直接在浏览器加载的 `oklch2rgb.wasm`、`rgb2oklch.wasm`、`extract-colors.wasm` 以及演示页面 `minimal.html`（无需 Emscripten JS 胶水）。
-- 演示页输入框新增了相对色度 `rel`（0..1，可留空）：
-  - 当 `rel` 留空时：调用绝对色度接口，使用输入的 `C`。
-  - 当填写 `rel`（数字且在 [0,1]）：调用相对色度接口，忽略输入的 `C`。
-- 导出函数（供 JS 直接调用）：
+#### `initSquircleWasm(options?)`
 
-  - `oklch2rgb_calc_js(L, C, h)` → 返回指向 `[R,G,B]` 的内存指针（int32，0..255）
-  - `oklch2rgb_calc_rel_js(L, h, rel)` → 相对色度版本，返回同上
-  - `rgb2oklch_calc_js(R, G, B)` → 返回指向 `[L,C,h]` 的内存指针（float64）
+```js
+import { initSquircleWasm } from "@wenhaoqi/wasm_design_utils";
 
-### 浏览器端更简单的 JS API（推荐）
+await initSquircleWasm();
 
-已提供统一模块 `wasm/color-convert.js`，一次初始化同时装载两个 WASM，并导出三个高层方法：
+await initSquircleWasm({
+  wasmUrl: new URL("./wasm/squircle-svg.wasm", import.meta.url).href,
+});
+```
+
+#### `getSquircle(width, height, radius)`
+
+```js
+import { getSquircle } from "@wenhaoqi/wasm_design_utils";
+
+const d = await getSquircle(200, 120, 16);
+```
+
+#### `getCapsule(width, height, radius)`
+
+```js
+import { getCapsule } from "@wenhaoqi/wasm_design_utils";
+
+const d = await getCapsule(300, 80, 24);
+```
+
+#### `getPath(shape, width, height, radius)`
+
+```js
+import { getPath } from "@wenhaoqi/wasm_design_utils";
+
+const squircleD = await getPath("squircle", 200, 120, 16);
+const capsuleD = await getPath("capsule", 200, 120, 16);
+```
+
+---
+
+## Combined example (vanilla ESM)
 
 ```js
 import {
   init,
   rgb2oklch,
   oklch2rgb_abs,
-  oklch2rgb_rel,
-} from "./wasm/color-convert.js";
+  extractColors,
+  getPath,
+} from "@wenhaoqi/wasm_design_utils";
 
-// 1) 初始化（幂等，重复调用不会重复加载）
 await init();
-// 可自定义 wasm 路径：await init({ oklch2rgbUrl: 'oklch2rgb.wasm', rgb2oklchUrl: 'rgb2oklch.wasm' });
+const { L, C, h } = await rgb2oklch(128, 100, 231);
+const rgb = await oklch2rgb_abs(L, C, h);
 
-// 2) sRGB(0..255) -> OKLCH
-const { L, C, h } = rgb2oklch(255, 0, 0);
+const img = document.querySelector("#photo");
+const palette = await extractColors(img, { pixels: 64000 });
 
-// 3) OKLCH 绝对色度 -> sRGB(0..255)
-const { R, G, B } = oklch2rgb_abs(0.62796, 0.25754, 29.23388);
-
-// 4) OKLCH 相对色度（0..1） -> sRGB(0..255)
-const rgbRel = oklch2rgb_rel(0.7, 40, 1); // 在该 L/h 下最大可显示色度
+const d = await getPath("squircle", 200, 120, 16);
+document.querySelector("path").setAttribute("d", d);
 ```
 
-说明：
-
-- `init()` 会解析相对路径基于当前模块位置，避免页面结构差异导致的加载失败。
-- 若仅使用提色模块，请参考下文的 `extract-colors.js` 说明；它独立于上述转换模块。
-
-- 浏览器端取色封装（API 对齐 Namide/extract-colors）：
+Subpath-only imports:
 
 ```js
-import extractColors from "./wasm/extract-colors.js";
-
-// 输入可为：URL 字符串、HTMLImageElement、ImageData（或 {data,width,height}）
-const colors = await extractColors(imgOrUrlOrImageData, {
-  pixels: 64000,
-  distance: 0.22,
-  saturationDistance: 0.2,
-  lightnessDistance: 0.2,
-  hueDistance: 1 / 12,
-  // colorValidator?: (r,g,b,a) => boolean
-});
+import { oklch2rgb_rel } from "@wenhaoqi/wasm_design_utils/color";
+import extractColors from "@wenhaoqi/wasm_design_utils/extract-colors";
+import { getCapsule } from "@wenhaoqi/wasm_design_utils/squircle";
 ```
 
-运行本地演示：
+### React (client-only)
 
-1. 在项目根目录起一个静态服务器（例如 Python http.server） python3 -m http.server 8000。
-2. 访问 `http://localhost:8000/wasm/minimal.html`。
-3. 在 oklch2rgb 区块中填写 L、h，若要使用相对色度则在 rel 输入 0..1，点击“转换”。
-4. 在 extract-colors 区块选择一张图片，点击“提取颜色”，可看到色卡与 JSON 输出（结果顶部显示本次耗时）。
+```jsx
+import { useEffect, useState } from "react";
+import { init, rgb2oklch } from "@wenhaoqi/wasm_design_utils";
 
-备注：当前仓库的 wasm 二进制已包含 `oklch2rgb_calc_rel_js` 新导出并通过本地验证；若自行重新编译 wasm，请使用 Emscripten 以独立 wasm（`-s STANDALONE_WASM=1 --no-entry`）方式生成，源码中已通过 `__attribute__((export_name(...)))` 指定导出名。
+export function OklchChip({ r, g, b }) {
+  const [label, setLabel] = useState("…");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await init();
+      const { L, C, h } = await rgb2oklch(r, g, b);
+      if (!cancelled) setLabel(`oklch(${L.toFixed(3)} ${C.toFixed(3)} ${h.toFixed(1)})`);
+    })();
+    return () => { cancelled = true; };
+  }, [r, g, b]);
+
+  return <span style={{ fontFamily: "monospace" }}>{label}</span>;
+}
+```
+
+In Next.js or similar, load this package only on the **client** (dynamic `import()`), since it relies on `fetch`, `Image`, and WebAssembly.
+
+---
+
+## Publishing to npm
+
+Package name: **`@wenhaoqi/wasm_design_utils`** (scoped). `package.json` includes `"publishConfig": { "access": "public" }` so the package can be published as **public** on the npm registry.
+
+The published tarball **must** contain the four WebAssembly files under `src/wasm/` (`oklch2rgb.wasm`, `rgb2oklch.wasm`, `extract-colors.wasm`, `squircle-svg.wasm`). Before `npm publish`:
+
+1. **Option A — Commit WASM:** run `make wasm` (requires [Emscripten](https://emscripten.org/) / `emcc` on your `PATH`), then commit the generated `src/wasm/*.wasm` files; or  
+2. **Option B — Build on publish:** run `npm publish` on a machine where `emcc` is available. The **`prepublishOnly`** script runs `scripts/ensure-wasm-built.js`, which checks for those files and runs `make wasm` if any are missing.
+
+If neither applies, `npm publish` will fail with a clear error — this avoids shipping a broken package without WASM.
+
+```bash
+npm login
+npm publish
+```
+
+To verify WASM locally without publishing: `node scripts/ensure-wasm-built.js` (same logic as `prepublishOnly`).
+
+---
+
+## Development & build
+
+### Makefile
+
+First-time WebAssembly build without global `emcc`:
+
+```bash
+npm run setup:wasm
+```
+
+This clones [`emsdk`](https://github.com/emscripten-core/emsdk) into `./emsdk/` (ignored by git), installs the latest SDK, and runs `make wasm`. Later builds:
+
+```bash
+source emsdk/emsdk_env.sh
+make wasm
+```
+
+```bash
+# Build bin/* and src/wasm/*.wasm, then run smoke tests
+make all
+
+make native   # macOS CLI only → bin/
+make wasm     # requires emcc on PATH (or use emsdk_env.sh above)
+make test
+make clean
+```
+
+- Native **`extract-colors`** requires **macOS** with `ImageIO`, `CoreGraphics`, and `CoreFoundation`.
+- **WASM** is built with `-s STANDALONE_WASM=1` and no Emscripten glue; exported symbols are listed in the `Makefile`.
+
+### Shell script
+
+```bash
+./scripts/build_all.sh
+```
+
+### Demo page
+
+```bash
+make wasm
+python3 -m http.server 8000
+# Open http://localhost:8000/examples/minimal.html
+```
+
+---
+
+## CLI tools (`make native`)
+
+| Command | Description |
+|---------|-------------|
+| `bin/rgb2oklch R G B` | Prints `L C h` |
+| `bin/oklch2rgb L C h [rel]` | Prints `R G B`; optional fourth arg is relative chroma 0–1 |
+| `bin/extract-colors <image>` | JSON palette (same core algorithm as the web path) |
+| `bin/squircle_svg squircle|capsule W H R` | Prints SVG path |
+
+---
+
+## License
+
+MIT — see `LICENSE`.

@@ -1,16 +1,14 @@
-// 可复用的 WASM 加载与取色工具（浏览器端 ESM）
-// API 对齐 Namide/extract-colors：默认导出 extractColors，另导出 initExtractColorsWasm
+// 图片主色 / 调色板提取（浏览器 ESM + extract-colors.wasm）
+// 默认导出 extractColors；initExtractColorsWasm 可显式预加载。
 
-// ---- 内部状态 ----
-let extractExports = null; // wasm 导出对象
-let extractMemory = null;  // WebAssembly.Memory
-let _wasmPromise = null;   // 单例加载承诺
+let extractExports = null;
+let extractMemory = null;
+let _wasmPromise = null;
 
-// 复用一个 Canvas/Context，避免频繁创建
 let _sharedCanvas = null;
 function getSharedCanvas() {
   if (_sharedCanvas) return _sharedCanvas;
-  _sharedCanvas = document.createElement('canvas');
+  _sharedCanvas = document.createElement("canvas");
   return _sharedCanvas;
 }
 
@@ -18,19 +16,25 @@ let _sharedCtx2D = null;
 function getShared2DContext() {
   if (_sharedCtx2D) return _sharedCtx2D;
   const canvas = getSharedCanvas();
-  _sharedCtx2D = canvas.getContext('2d', { willReadFrequently: true });
+  _sharedCtx2D = canvas.getContext("2d", { willReadFrequently: true });
   return _sharedCtx2D;
 }
 
-// 顶层 env 资源，供可能的 env.memory 导入复用
 const ENV_MEMORY = new WebAssembly.Memory({ initial: 256, maximum: 2048 });
-const ENV_TABLE = new WebAssembly.Table({ initial: 0, element: 'anyfunc' });
+const ENV_TABLE = new WebAssembly.Table({ initial: 0, element: "anyfunc" });
 
-async function instantiateWasmWithFallback(asset) {
-  const wasmUrl = new URL(`./${asset}`, import.meta.url).href;
-  const resp = await fetch(wasmUrl);
-  if (!resp.ok) throw new Error(`fetch ${asset} failed: ${resp.status} ${resp.statusText}`);
-  const contentType = resp.headers.get('content-type') || '';
+function resolveWasmUrl(urlOrRelative) {
+  if (typeof urlOrRelative === "string" && urlOrRelative.includes("://")) {
+    return urlOrRelative;
+  }
+  const rel = urlOrRelative ?? "./wasm/extract-colors.wasm";
+  return new URL(rel, import.meta.url).href;
+}
+
+async function instantiateWasmWithFallback(resolvedUrl) {
+  const resp = await fetch(resolvedUrl);
+  if (!resp.ok) throw new Error(`fetch extract-colors wasm failed: ${resp.status} ${resp.statusText}`);
+  const contentType = resp.headers.get("content-type") || "";
 
   const wasiNoop = () => 0;
   const wasiShim = {
@@ -53,9 +57,9 @@ async function instantiateWasmWithFallback(asset) {
     emscripten_notify_memory_growth: () => { },
     memory: ENV_MEMORY,
     table: ENV_TABLE,
-    __stack_pointer: new WebAssembly.Global({ value: 'i32', mutable: true }, 0),
-    __data_end: new WebAssembly.Global({ value: 'i32', mutable: false }, 0),
-    __heap_base: new WebAssembly.Global({ value: 'i32', mutable: false }, 0),
+    __stack_pointer: new WebAssembly.Global({ value: "i32", mutable: true }, 0),
+    __data_end: new WebAssembly.Global({ value: "i32", mutable: false }, 0),
+    __heap_base: new WebAssembly.Global({ value: "i32", mutable: false }, 0),
   };
   const importObject = {
     wasi_snapshot_preview1: wasiShim,
@@ -63,7 +67,7 @@ async function instantiateWasmWithFallback(asset) {
     env: envShim,
   };
 
-  if ('instantiateStreaming' in WebAssembly && contentType.includes('application/wasm')) {
+  if ("instantiateStreaming" in WebAssembly && contentType.includes("application/wasm")) {
     const { instance } = await WebAssembly.instantiateStreaming(resp, importObject);
     return instance;
   }
@@ -72,14 +76,15 @@ async function instantiateWasmWithFallback(asset) {
   return instance;
 }
 
-async function loadExtractColorsWasm() {
+async function loadExtractColorsWasm(options = {}) {
   if (_wasmPromise) return _wasmPromise;
   _wasmPromise = (async () => {
-    const instance = await instantiateWasmWithFallback('extract-colors.wasm');
+    const url = resolveWasmUrl(options.wasmUrl);
+    const instance = await instantiateWasmWithFallback(url);
     const exports = instance.exports;
     const exportedMem = exports && exports.memory;
     const mem = exportedMem instanceof WebAssembly.Memory ? exportedMem : ENV_MEMORY;
-    if (!mem) throw new Error('wasm memory not found');
+    if (!mem) throw new Error("wasm memory not found");
     extractExports = exports;
     extractMemory = mem;
     return exports;
@@ -87,25 +92,25 @@ async function loadExtractColorsWasm() {
   return _wasmPromise;
 }
 
-async function ensureWasmReady() {
+async function ensureWasmReady(options) {
   if (extractExports) return;
-  await loadExtractColorsWasm();
+  await loadExtractColorsWasm(options);
 }
 
-export async function initExtractColorsWasm() {
-  await ensureWasmReady();
+export async function initExtractColorsWasm(options) {
+  await ensureWasmReady(options ?? {});
 }
 
 export default async function extractColors(input, opts) {
-  await ensureWasmReady();
+  await ensureWasmReady(opts);
 
   const toImageData = async () => {
-    if (typeof input === 'string') {
+    if (typeof input === "string") {
       const img = await new Promise((resolve, reject) => {
         const el = new Image();
-        el.crossOrigin = (opts && opts.crossOrigin) ?? '';
+        el.crossOrigin = (opts && opts.crossOrigin) ?? "";
         el.onload = () => resolve(el);
-        el.onerror = () => reject(new Error('image load error'));
+        el.onerror = () => reject(new Error("image load error"));
         el.src = input;
       });
       return extractImageDataViaCanvas(img, opts && opts.pixels);
@@ -119,13 +124,13 @@ export default async function extractColors(input, opts) {
   };
 
   const imageData = await toImageData();
-  if (!extractExports || !extractMemory) throw new Error('WASM 未就绪，请先调用 loadExtractColorsWasm()');
+  if (!extractExports || !extractMemory) throw new Error("WASM 未就绪");
 
   const { width, height, data } = imageData;
-  const hasCustomValidator = typeof (opts && opts.colorValidator) === 'function';
+  const hasCustomValidator = typeof (opts && opts.colorValidator) === "function";
   const len = data.byteLength >>> 0;
   const ptr = extractExports.get_pixels_buffer(len) >>> 0;
-  if (!ptr) throw new Error('get_pixels_buffer 失败');
+  if (!ptr) throw new Error("get_pixels_buffer 失败");
   const heapU8 = new Uint8Array(extractMemory.buffer, ptr, len);
   if (hasCustomValidator) {
     const validator = opts.colorValidator;
@@ -164,7 +169,7 @@ export default async function extractColors(input, opts) {
     alphaThreshold | 0,
     maxColors | 0
   ) >>> 0;
-  if (!outPtr) throw new Error('extract_colors_from_rgba_js 失败');
+  if (!outPtr) throw new Error("extract_colors_from_rgba_js 失败");
 
   const f64 = new Float64Array(extractMemory.buffer, outPtr, 1 + 8 * 64);
   const m = Math.max(0, Math.min(64, Math.floor(f64[0])));
@@ -179,8 +184,7 @@ export default async function extractColors(input, opts) {
     const lightness = f64[base + 5];
     const saturation = f64[base + 6];
     const area = f64[base + 7];
-    const hex = `#${[red, green, blue].map(v => v.toString(16).padStart(2, '0')).join('')}`;
-    // 保持与 TS 版本一致的字段顺序
+    const hex = `#${[red, green, blue].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
     out.push({ hex, red, green, blue, area, hue, saturation, lightness, intensity });
   }
   out.sort((a, b) => {
@@ -191,12 +195,11 @@ export default async function extractColors(input, opts) {
   return out;
 }
 
-// ---- 辅助函数 ----
 function isImageData(x) {
-  return x && typeof x === 'object' && typeof x.width === 'number' && typeof x.height === 'number' && x.data instanceof Uint8ClampedArray;
+  return x && typeof x === "object" && typeof x.width === "number" && typeof x.height === "number" && x.data instanceof Uint8ClampedArray;
 }
 function isImageDataAlt(x) {
-  return x && typeof x === 'object' && typeof x.width === 'number' && typeof x.height === 'number' && x.data && typeof x.data.length === 'number';
+  return x && typeof x === "object" && typeof x.width === "number" && typeof x.height === "number" && x.data && typeof x.data.length === "number";
 }
 function extractImageDataViaCanvas(source, targetPixels = 64000) {
   const canvas = getSharedCanvas();
@@ -210,7 +213,7 @@ function extractImageDataViaCanvas(source, targetPixels = 64000) {
   const needResize = canvas.width !== w || canvas.height !== h;
   if (needResize) {
     canvas.width = w; canvas.height = h;
-    ctx.imageSmoothingEnabled = false; ctx.imageSmoothingQuality = 'low';
+    ctx.imageSmoothingEnabled = false; ctx.imageSmoothingQuality = "low";
   } else {
     ctx.clearRect(0, 0, w, h);
   }
@@ -222,7 +225,7 @@ function createImageDataFromRaw(data, width, height) {
   try { return new ImageData(data, width, height); }
   catch (_e) {
     const canvas = getSharedCanvas();
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     const img = ctx.createImageData(width, height);
     img.data.set(data);
     return img;
