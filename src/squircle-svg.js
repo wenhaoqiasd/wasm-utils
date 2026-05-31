@@ -26,28 +26,24 @@ function createWasiStub(memory) {
 }
 
 async function instantiateWasmWithFallback(url) {
-  try {
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
-    const ct = resp.headers.get("content-type") || "";
-    if (WebAssembly.instantiateStreaming && ct.includes("application/wasm")) {
-      const { instance } = await WebAssembly.instantiateStreaming(resp, {});
-      return instance;
-    }
-    const { instance } = await WebAssembly.instantiate(await resp.arrayBuffer(), {});
-    return instance;
-  } catch {
-    const resp2 = await fetch(url);
-    if (!resp2.ok) throw new Error(`Failed to fetch ${url}: ${resp2.status}`);
-    const buf = await resp2.arrayBuffer();
-    const memory = new WebAssembly.Memory({ initial: 64, maximum: 16384 });
-    const imports = {
-      wasi_snapshot_preview1: createWasiStub(memory),
-      env: { memory, abort() { }, emscripten_notify_memory_growth() { } },
-    };
-    const { instance } = await WebAssembly.instantiate(buf, imports);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
+  const ct = resp.headers.get("content-type") || "";
+
+  const memory = new WebAssembly.Memory({ initial: 64, maximum: 16384 });
+  const imports = {
+    wasi_snapshot_preview1: createWasiStub(memory),
+    env: { memory, abort() { }, emscripten_notify_memory_growth() { } },
+  };
+
+  if (WebAssembly.instantiateStreaming && ct.includes("application/wasm")) {
+    const { instance } = await WebAssembly.instantiateStreaming(resp, imports);
     return instance;
   }
+
+  const buf = await resp.arrayBuffer();
+  const { instance } = await WebAssembly.instantiate(buf, imports);
+  return instance;
 }
 
 let _inst = null;

@@ -1,6 +1,6 @@
 {
   "name": "@wenhaoqi/wasm_design_utils",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OKLCH ↔ sRGB in WebAssembly, image palette extraction, and squircle/capsule SVG paths — browser ESM.",
   "type": "module",
   "sideEffects": false,
