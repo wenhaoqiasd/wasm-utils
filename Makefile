@@ -37,6 +37,7 @@ $(BIN_DIR)/squircle_svg: $(NATIVE_DIR)/squircle_svg.c | $(BIN_DIR)
 	$(CC) $(CFLAGS) $(NATIVE_EXTRA) $< -o $@
 
 wasm: $(WASM_DIR) $(WASM_BINS)
+	node scripts/embed-wasm-base64.js
 
 $(WASM_DIR)/oklch2rgb.wasm: $(NATIVE_DIR)/oklch2rgb.c | $(WASM_DIR)
 	$(EMCC) $(EMFLAGS) \

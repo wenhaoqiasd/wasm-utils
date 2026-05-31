@@ -11,7 +11,7 @@ export interface ExtractColorSwatch {
 }
 
 export interface ExtractColorsOptions {
-  /** 默认 `./wasm/extract-colors.wasm` */
+  /** 可选：外部托管的 extract-colors.wasm（绝对 URL 或相对 import.meta.url）；默认内联 base64 */
   wasmUrl?: string;
   pixels?: number;
   distance?: number;

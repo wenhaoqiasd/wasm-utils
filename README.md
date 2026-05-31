@@ -9,8 +9,9 @@ Browser-first **ESM** package: **sRGB ↔ OKLCH** conversion in WebAssembly, **i
 | Path | Purpose |
 |------|---------|
 | `native/*.c` | Algorithms and CLI sources |
-| `src/*.js` | Browser loaders/wrappers (`import.meta.url` resolves WASM next to each module under `src/wasm/`) |
-| `src/wasm/*.wasm` | Emscripten outputs (run `make wasm`; generate from source if not checked in) |
+| `src/*.js` | Browser loaders/wrappers (default: inline base64 WASM in `src/wasm-bytes/`) |
+| `src/wasm-bytes/*.js` | Auto-generated base64 embeds (`node scripts/embed-wasm-base64.js` after `make wasm`) |
+| `src/wasm/*.wasm` | Emscripten build outputs (dev/build only; not shipped in npm tarball since 0.2.0) |
 | `bin/*` | Native binaries from `make native` (ignored by git by default) |
 | `examples/minimal.html` | Static demo (serve over HTTP; build WASM first) |
 
@@ -31,7 +32,9 @@ The package is **ESM-only** (`"type": "module"`). TypeScript definitions ship as
 | `@wenhaoqi/wasm_design_utils/extract-colors` | Palette extraction only |
 | `@wenhaoqi/wasm_design_utils/squircle` | Squircle / capsule paths only |
 
-Bundlers (Vite, Webpack 5+, etc.) treat `src/wasm/*.wasm` as assets. If WASM files are missing, run `make wasm` in this repo or place the four `.wasm` files under `src/wasm/` in the published package.
+Bundlers load the package as plain ESM — WASM bytes are embedded as base64 by default (no `.wasm` fetch, avoids browser extension blocking). Optional `*Url` options fetch externally hosted `.wasm` files instead.
+
+For local development, run `make wasm` to build `src/wasm/*.wasm` and regenerate `src/wasm-bytes/*.js`.
 
 ---
 
@@ -41,18 +44,18 @@ Bundlers (Vite, Webpack 5+, etc.) treat `src/wasm/*.wasm` as assets. If WASM fil
 
 | Function | Description |
 |----------|-------------|
-| `init(options?)` | Preloads `oklch2rgb.wasm` and `rgb2oklch.wasm` in parallel (idempotent). Optional `oklch2rgbUrl`, `rgb2oklchUrl` (relative to this module or absolute URL). |
+| `init(options?)` | Preloads both color WASM modules in parallel (idempotent). **Default: inline base64** (no network). Optional `oklch2rgbUrl`, `rgb2oklchUrl` fetch externally hosted `.wasm`. |
 | `rgb2oklch(r, g, b)` | sRGB 8-bit channels 0–255 → `{ L, C, h }` (L ∈ [0, 1], `h` in degrees). |
 | `oklch2rgb_abs(L, C, h)` | Absolute chroma OKLCH → `{ R, G, B }`. |
 | `oklch2rgb_rel(L, h, rel)` | **Relative chroma** `rel` ∈ [0, 1]: uses that fraction of the maximum in-gamut chroma at the given L and h (ignores a separate C input) → `{ R, G, B }`. |
 
-Default WASM URLs resolve from each module to `./wasm/oklch2rgb.wasm` and `./wasm/rgb2oklch.wasm`.
+Default: WASM is instantiated from inline base64 (no fetch). Pass `oklch2rgbUrl` / `rgb2oklchUrl` only when loading `.wasm` from your own CDN or static assets.
 
 ### Palette: `extractColors`, `initExtractColorsWasm`
 
 | Function | Description |
 |----------|-------------|
-| `initExtractColorsWasm(options?)` | Preloads `extract-colors.wasm`; optional `wasmUrl`. |
+| `initExtractColorsWasm(options?)` | Preloads extract-colors WASM (default: inline base64); optional `wasmUrl` for external fetch. |
 | `extractColors(input, opts?)` | Extracts a palette from a **URL string**, **HTMLImageElement**, **ImageData**, or `{ data, width, height }`. Returns objects such as `{ hex, red, green, blue, hue, intensity, lightness, saturation, area, … }` with the same ordering rules as the implementation. |
 
 Common options: `pixels`, `distance`, `saturationDistance`, `lightnessDistance`, `hueDistance`, `crossOrigin`, `colorValidator(r,g,b,a)`.
@@ -61,7 +64,7 @@ Common options: `pixels`, `distance`, `saturationDistance`, `lightnessDistance`,
 
 | Function | Description |
 |----------|-------------|
-| `initSquircleWasm(options?)` | Preloads `squircle-svg.wasm`; optional `wasmUrl`. |
+| `initSquircleWasm(options?)` | Preloads squircle WASM (default: inline base64); optional `wasmUrl` for external fetch. |
 | `getSquircle(w, h, r)` | SVG path **`d`** string for a squircle. |
 | `getCapsule(w, h, r)` | SVG path **`d`** string for a capsule. |
 | `getPath(shape, w, h, r)` | Dispatches when `shape` is `'squircle'` or `'capsule'`. |
@@ -263,7 +266,7 @@ export function OklchChip({ r, g, b }) {
 }
 ```
 
-In Next.js or similar, load this package only on the **client** (dynamic `import()`), since it relies on `fetch`, `Image`, and WebAssembly.
+In Next.js or similar, load this package only on the **client** (dynamic `import()`), since it relies on `Image` and WebAssembly (and optional `fetch` when using custom `*Url`).
 
 ---
 
@@ -271,12 +274,12 @@ In Next.js or similar, load this package only on the **client** (dynamic `import
 
 Package name: **`@wenhaoqi/wasm_design_utils`** (scoped). `package.json` includes `"publishConfig": { "access": "public" }` so the package can be published as **public** on the npm registry.
 
-The published tarball **must** contain the four WebAssembly files under `src/wasm/` (`oklch2rgb.wasm`, `rgb2oklch.wasm`, `extract-colors.wasm`, `squircle-svg.wasm`). Before `npm publish`:
+The published tarball embeds WASM as base64 in `src/wasm-bytes/*.js` (no separate `.wasm` files). Before `npm publish`:
 
-1. **Option A — Commit WASM:** run `make wasm` (requires [Emscripten](https://emscripten.org/) / `emcc` on your `PATH`), then commit the generated `src/wasm/*.wasm` files; or  
-2. **Option B — Build on publish:** run `npm publish` on a machine where `emcc` is available. The **`prepublishOnly`** script runs `scripts/ensure-wasm-built.js`, which checks for those files and runs `make wasm` if any are missing.
+1. **Option A — Commit embeds:** run `make wasm` (requires [Emscripten](https://emscripten.org/) / `emcc` on your `PATH`), which also runs `embed-wasm-base64.js`; commit `src/wasm-bytes/*.js`; or  
+2. **Option B — Build on publish:** run `npm publish` on a machine where `emcc` is available. **`prepublishOnly`** runs `ensure-wasm-built.js` (builds `src/wasm/*.wasm` if missing) then `embed-wasm-base64.js`.
 
-If neither applies, `npm publish` will fail with a clear error — this avoids shipping a broken package without WASM.
+If neither applies, `npm publish` will fail with a clear error.
 
 ```bash
 npm login
@@ -305,13 +308,14 @@ make wasm
 ```
 
 ```bash
-# Build bin/* and src/wasm/*.wasm, then run smoke tests
+# Build bin/*, src/wasm/*.wasm, and src/wasm-bytes/*.js, then run smoke tests
 make all
 
 make native   # macOS CLI only → bin/
-make wasm     # requires emcc on PATH (or use emsdk_env.sh above)
+make wasm     # requires emcc; also regenerates src/wasm-bytes/
 make test
 make clean
+npm run embed # regenerate base64 embeds only (requires existing src/wasm/*.wasm)
 ```
 
 - Native **`extract-colors`** requires **macOS** with `ImageIO`, `CoreGraphics`, and `CoreFoundation`.

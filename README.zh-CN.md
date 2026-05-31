@@ -9,8 +9,9 @@
 | 路径 | 说明 |
 |------|------|
 | `native/*.c` | 算法与 CLI 源码 |
-| `src/*.js` | 浏览器端封装（通过 `import.meta.url` 加载 `src/wasm/` 下的 WASM） |
-| `src/wasm/*.wasm` | Emscripten 构建产物（执行 `make wasm`；若未提交可从源码生成） |
+| `src/*.js` | 浏览器端封装（默认从 `src/wasm-bytes/` 内联 base64 实例化 WASM） |
+| `src/wasm-bytes/*.js` | 自动生成的 base64 嵌入（`make wasm` 后运行 `embed-wasm-base64.js`） |
+| `src/wasm/*.wasm` | Emscripten 构建产物（仅开发/构建用；0.2.0 起 npm 包不再包含） |
 | `bin/*` | `make native` 生成的本地可执行文件（默认被 git 忽略） |
 | `examples/minimal.html` | 本地静态页演示（需 HTTP 访问；先构建 WASM） |
 
@@ -31,7 +32,9 @@ npm install @wenhaoqi/wasm_design_utils
 | `@wenhaoqi/wasm_design_utils/extract-colors` | 仅图片取色 |
 | `@wenhaoqi/wasm_design_utils/squircle` | 仅 squircle/capsule 路径 |
 
-构建工具（Vite、Webpack 5+ 等）会把 `src/wasm/*.wasm` 作为资源打包。若 WASM 尚未生成，请在本仓库执行 `make wasm`，或将构建好的四个 `.wasm` 放到包的 `src/wasm/` 中。
+构建工具以普通 ESM 加载本包 — WASM 默认以内联 base64 实例化（无需 fetch `.wasm`，避免浏览器扩展拦截）。可选 `*Url` 参数改为从外部 URL fetch。
+
+本地开发请执行 `make wasm` 生成 `src/wasm/*.wasm` 并更新 `src/wasm-bytes/*.js`。
 
 ---
 
@@ -41,18 +44,18 @@ npm install @wenhaoqi/wasm_design_utils
 
 | 函数 | 作用 |
 |------|------|
-| `init(options?)` | 并行预加载 `oklch2rgb.wasm` 与 `rgb2oklch.wasm`（幂等）。可选 `oklch2rgbUrl`、`rgb2oklchUrl`（相对本模块或完整 URL）。 |
+| `init(options?)` | 并行预加载两块颜色 WASM（幂等）。**默认内联 base64**（无网络请求）。可选 `oklch2rgbUrl`、`rgb2oklchUrl` 从外部 fetch。 |
 | `rgb2oklch(r, g, b)` | sRGB 8 位通道 0–255 → `{ L, C, h }`（L∈[0,1]，h 为度）。 |
 | `oklch2rgb_abs(L, C, h)` | 绝对色度 OKLCH → `{ R, G, B }`。 |
 | `oklch2rgb_rel(L, h, rel)` | **相对色度** `rel`∈[0,1]：在该 L、h 下使用色域内可达最大色度的比例（忽略单独传入的 C）→ `{ R, G, B }`。 |
 
-默认 WASM 路径为相对模块的 `./wasm/oklch2rgb.wasm` 与 `./wasm/rgb2oklch.wasm`。
+默认从内联 base64 实例化（无 fetch）。仅当需要从自有 CDN/静态资源加载 `.wasm` 时才传 `oklch2rgbUrl` / `rgb2oklchUrl`。
 
 ### 取色：`extractColors`、`initExtractColorsWasm`
 
 | 函数 | 作用 |
 |------|------|
-| `initExtractColorsWasm(options?)` | 预加载 `extract-colors.wasm`；可选 `wasmUrl`。 |
+| `initExtractColorsWasm(options?)` | 预加载 extract-colors WASM（默认内联 base64）；可选 `wasmUrl` 外部 fetch。 |
 | `extractColors(input, opts?)` | 从 **URL 字符串**、**HTMLImageElement**、**ImageData**（或 `{ data, width, height }`）提取调色板。返回若干 `{ hex, red, green, blue, hue, intensity, lightness, saturation, area, … }`，排序与实现一致。 |
 
 常用选项：`pixels`、`distance`、`saturationDistance`、`lightnessDistance`、`hueDistance`、`crossOrigin`、`colorValidator(r,g,b,a)`。
@@ -61,7 +64,7 @@ npm install @wenhaoqi/wasm_design_utils
 
 | 函数 | 作用 |
 |------|------|
-| `initSquircleWasm(options?)` | 预加载 `squircle-svg.wasm`；可选 `wasmUrl`。 |
+| `initSquircleWasm(options?)` | 预加载 squircle WASM（默认内联 base64）；可选 `wasmUrl` 外部 fetch。 |
 | `getSquircle(w, h, r)` | 返回 squircle 形状的 SVG path **`d` 字符串**。 |
 | `getCapsule(w, h, r)` | 返回 capsule 形状的 SVG path **`d` 字符串**。 |
 | `getPath(shape, w, h, r)` | `shape` 为 `'squircle'` 或 `'capsule'` 时委托上述二者。 |
@@ -263,7 +266,7 @@ export function OklchChip({ r, g, b }) {
 }
 ```
 
-在 Next.js 等环境中请仅在 **客户端** 使用动态 `import()` 加载本包（依赖 `fetch` / `Image` / WASM）。
+在 Next.js 等环境中请仅在 **客户端** 使用动态 `import()` 加载本包（依赖 `Image` / WASM；使用自定义 `*Url` 时还需 `fetch`）。
 
 ---
 
@@ -271,10 +274,10 @@ export function OklchChip({ r, g, b }) {
 
 包名为 **`@wenhaoqi/wasm_design_utils`**（作用域包）。`package.json` 中已配置 `"publishConfig": { "access": "public" }`，便于在 npm 上发布为**公开**包。
 
-发布到 npm 的压缩包**必须**包含 `src/wasm/` 下的四个 `.wasm` 文件（`oklch2rgb.wasm`、`rgb2oklch.wasm`、`extract-colors.wasm`、`squircle-svg.wasm`）。在执行 `npm publish` 前任选其一：
+发布到 npm 的压缩包将 WASM 以 base64 嵌入 `src/wasm-bytes/*.js`（不再单独包含 `.wasm` 文件）。在执行 `npm publish` 前任选其一：
 
-1. **做法 A — 提交 WASM：**在本机执行 `make wasm`（需安装 [Emscripten](https://emscripten.org/)，且 `emcc` 在 `PATH` 中），再把生成的 `src/wasm/*.wasm` **提交进仓库**；或  
-2. **做法 B — 发布时再编：**在已安装 `emcc` 的机器上执行 `npm publish`。**`prepublishOnly`** 会运行 `scripts/ensure-wasm-built.js`：若缺少上述文件则自动执行 `make wasm`。
+1. **做法 A — 提交 embed：**在本机执行 `make wasm`（需安装 [Emscripten](https://emscripten.org/)，且 `emcc` 在 `PATH` 中），会自动运行 `embed-wasm-base64.js`；提交 `src/wasm-bytes/*.js`；或  
+2. **做法 B — 发布时再编：**在已安装 `emcc` 的机器上执行 `npm publish`。**`prepublishOnly`** 会运行 `ensure-wasm-built.js`（缺 WASM 则 `make wasm`）再运行 `embed-wasm-base64.js`。
 
 若两种条件都不满足，`npm publish` 会失败并提示原因，避免发出不含 WASM 的损坏包。
 
@@ -305,13 +308,14 @@ make wasm
 ```
 
 ```bash
-# 生成 bin/* 与 src/wasm/*.wasm，并运行烟测
+# 生成 bin/*、src/wasm/*.wasm、src/wasm-bytes/*.js，并运行烟测
 make all
 
 make native   # 仅 macOS 本地 CLI → bin/
-make wasm     # 需 PATH 中有 emcc，或先用上面的 emsdk_env.sh
+make wasm     # 需 emcc；同时 regenerate src/wasm-bytes/
 make test
 make clean
+npm run embed # 仅重新生成 base64 嵌入（需已有 src/wasm/*.wasm）
 ```
 
 - **原生** `extract-colors` 依赖 **macOS** 与 `ImageIO`、`CoreGraphics`、`CoreFoundation`。

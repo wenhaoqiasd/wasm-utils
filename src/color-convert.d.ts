@@ -1,8 +1,8 @@
-/** 预加载 oklch2rgb 与 rgb2oklch 两块 WASM（幂等）。 */
+/** 预加载 oklch2rgb 与 rgb2oklch 两块 WASM（幂等）。默认内联 base64；传 URL 则从外部 fetch。 */
 export function init(options?: {
-  /** 默认 `./wasm/oklch2rgb.wasm`（相对本模块）或完整 URL */
+  /** 可选：外部托管的 oklch2rgb.wasm（绝对 URL 或相对 import.meta.url） */
   oklch2rgbUrl?: string;
-  /** 默认 `./wasm/rgb2oklch.wasm` */
+  /** 可选：外部托管的 rgb2oklch.wasm */
   rgb2oklchUrl?: string;
 }): Promise<void>;
 

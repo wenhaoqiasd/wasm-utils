@@ -1,6 +1,6 @@
 {
   "name": "@wenhaoqi/wasm_design_utils",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "OKLCH ↔ sRGB in WebAssembly, image palette extraction, and squircle/capsule SVG paths — browser ESM.",
   "type": "module",
   "sideEffects": false,
@@ -23,7 +23,6 @@
   "files": [
     "src/**/*.js",
     "src/**/*.d.ts",
-    "src/wasm/*.wasm",
     "native/**/*.c",
     "README.md",
     "README.zh-CN.md",
@@ -54,7 +53,8 @@
     "build:wasm": "make wasm",
     "build": "make all",
     "test": "make test",
-    "prepublishOnly": "node scripts/ensure-wasm-built.js",
+    "embed": "node scripts/embed-wasm-base64.js",
+    "prepublishOnly": "node scripts/ensure-wasm-built.js && node scripts/embed-wasm-base64.js",
     "setup:wasm": "bash scripts/setup-wasm-toolchain.sh"
   },
   "engines": {

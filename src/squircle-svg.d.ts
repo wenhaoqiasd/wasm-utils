@@ -1,5 +1,5 @@
 export interface SquircleOptions {
-  /** 默认 `./wasm/squircle-svg.wasm` */
+  /** 可选：外部托管的 squircle-svg.wasm（绝对 URL 或相对 import.meta.url）；默认内联 base64 */
   wasmUrl?: string;
 }
 
